@@ -149,6 +149,30 @@ DETECT_ZERO_AS_NC = True
 
 MAX_LOG_SENSORS = 10
 RAW_LOG_DIR = REPO / "data" / "raw"
+PUMP_LOG_FIELDS: list[tuple[str, str, str]] = [
+    ("pump_cmd_pct", "cmd_pct", "{:.3f}"),
+    ("pump_cmd_hz", "cmd_hz", "{:.3f}"),
+    ("pump_freq_hz", "freq_hz", "{:.3f}"),
+    ("pump_freq_pct", "freq_pct", "{:.2f}"),
+    ("pump_input_power_w", "input_power_w", "{:.2f}"),
+    ("pump_input_power_pct", "input_power_pct", "{:.2f}"),
+    ("pump_output_current_a", "output_current_a", "{:.3f}"),
+    ("pump_output_current_pct", "output_current_pct", "{:.2f}"),
+    ("pump_output_voltage_v", "output_voltage_v", "{:.2f}"),
+    ("pump_output_voltage_pct", "output_voltage_pct", "{:.2f}"),
+    ("pump_pressure_before_bar", "pressure_before_bar", "{:.3f}"),
+    ("pump_pressure_after_bar", "pressure_after_bar", "{:.3f}"),
+    ("pump_pressure_tank_bar", "pressure_tank_bar", "{:.3f}"),
+    ("pump_pressure_before_bar_abs", "pressure_before_bar_abs", "{:.3f}"),
+    ("pump_pressure_after_bar_abs", "pressure_after_bar_abs", "{:.3f}"),
+    ("pump_pressure_tank_bar_abs", "pressure_tank_bar_abs", "{:.3f}"),
+    ("pump_pressure_after_v", "pressure_after_v", "{:.3f}"),
+    ("pump_pressure_before_psi", "pressure_before_psi", "{:.2f}"),
+    ("pump_pressure_after_psi", "pressure_after_psi", "{:.2f}"),
+    ("pump_pressure_tank_psi", "pressure_tank_psi", "{:.2f}"),
+    ("pump_pressure_error_bar", "pressure_error_bar", "{:.3f}"),
+    ("pump_max_freq_hz", "max_freq_hz", "{:.3f}"),
+]
 
 def candidate_serial_ports() -> list[str]:
     ports: list[str] = []
@@ -211,7 +235,12 @@ def _start_logging(state, filename: Optional[str] = None) -> dict:
     path = RAW_LOG_DIR / safe_name
     fh = path.open("w", newline="", encoding="utf-8")
     writer = csv.writer(fh)
-    header = ["time_s"] + [f"temp{i}_C" for i in range(MAX_LOG_SENSORS)] + ["valve", "mode"]
+    header = (
+        ["time_s"]
+        + [f"temp{i}_C" for i in range(MAX_LOG_SENSORS)]
+        + ["valve", "mode"]
+        + [col for col, _, _ in PUMP_LOG_FIELDS]
+    )
     writer.writerow(header)
     fh.flush()
     state.log_enabled = True
@@ -281,6 +310,15 @@ def _maybe_log_telemetry(state, payload: dict) -> None:
     row.append(str(int(valve)) if isinstance(valve, (int, float)) else "0")
     mode = payload.get("mode") or ""
     row.append(str(mode)[:1])
+
+    pump_raw = payload.get("pump")
+    pump = pump_raw if isinstance(pump_raw, dict) else {}
+    for _, key, fmt in PUMP_LOG_FIELDS:
+        value = pump.get(key)
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            row.append(fmt.format(float(value)))
+        else:
+            row.append("nan")
 
     try:
         writer.writerow(row)

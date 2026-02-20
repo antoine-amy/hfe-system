@@ -474,13 +474,19 @@ def plot_temperature_window_fit(
     *,
     title: str | None = None,
     annotate: bool = True,
+    figsize: Tuple[float, float] | None = None,
+    axis_fontsize: float | None = None,
+    legend_fontsize: float | None = None,
+    annot_fontsize: float | None = None,
 ) -> "plt.Figure":
     """
     Plot the windowed bulk-temperature samples with the corresponding best-fit line.
     """
     import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(figsize=(7.0, 4.2))
+    if figsize is None:
+        figsize = (7.0, 4.2)
+    fig, ax = plt.subplots(figsize=figsize)
     ax.scatter(fit.time_min, fit.temps_C, s=14, alpha=0.6, label="Bulk mean samples")
     order = np.argsort(fit.time_min)
     ax.plot(
@@ -490,11 +496,13 @@ def plot_temperature_window_fit(
         linewidth=2,
         label=f"Fit slope = {fit.slope_C_per_min:.3f} °C/min",
     )
-    ax.set_xlabel("Time (min)")
-    ax.set_ylabel("Bulk mean temperature (°C)")
+    ax.set_xlabel("Time (min)", fontsize=axis_fontsize)
+    ax.set_ylabel("Bulk mean temperature (°C)", fontsize=axis_fontsize)
     ax.set_title(title or fit.dataset)
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="best")
+    if axis_fontsize is not None:
+        ax.tick_params(axis="both", labelsize=axis_fontsize)
+    ax.legend(loc="best", fontsize=legend_fontsize)
 
     if annotate:
         metrics_text = "\n".join(
@@ -509,13 +517,13 @@ def plot_temperature_window_fit(
             ]
         )
         ax.text(
-            0.98,
+            0.02,
             0.02,
             metrics_text,
             transform=ax.transAxes,
-            fontsize=9,
+            fontsize=annot_fontsize if annot_fontsize is not None else 9,
             va="bottom",
-            ha="right",
+            ha="left",
             bbox=dict(boxstyle="round", facecolor="white", alpha=0.85),
         )
     fig.tight_layout()

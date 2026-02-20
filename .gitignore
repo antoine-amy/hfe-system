@@ -3,6 +3,7 @@
 .vscode
 firmware/.pio/
 firmware/.vscode/
+*./cursor/
 
 # Virtual environments
 .venv*/

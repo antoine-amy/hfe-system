@@ -26,10 +26,16 @@ def plot_temperatures(
     include_valve: bool = False,
     valve_label: str = "Valve state",
     height_scale: float = 1.0,
+    figsize: Tuple[float, float] | None = None,
+    axis_fontsize: float | None = None,
+    legend_fontsize: float | None = None,
+    title_fontsize: float | None = None,
 ) -> Tuple[plt.Figure, plt.Axes]:
     """Plot the primary temperature channels for a dataset."""
     data = _ensure_means(df)
-    fig, ax = plt.subplots(figsize=(8, 4 * height_scale * 1.15))
+    if figsize is None:
+        figsize = (8, 4 * height_scale * 1.15)
+    fig, ax = plt.subplots(figsize=figsize)
     ax.plot(data["t_min"], data["U1_bottom_C"], label="U1 bottom")
     ax.plot(data["t_min"], data["U3_top_C"], label="U3 top")
     ax.plot(data["t_min"], data["U2_coilTop_C"], label="U2 coil top")
@@ -38,10 +44,15 @@ def plot_temperatures(
         ax.plot(data['t_min'], data['T_bulk_mean_C'], color='tab:purple', linewidth=1, linestyle="--", label='Bulk mean')
     if "T_coil_mean_C" in data.columns:
         ax.plot(data["t_min"], data["T_coil_mean_C"], color='tab:brown', linestyle="--", linewidth=1, label='Coil mean')
-    ax.set_xlabel("Time (min)")
-    ax.set_ylabel("Temperature (°C)")
-    ax.set_title(title)
+    ax.set_xlabel("Time (min)", fontsize=axis_fontsize)
+    ax.set_ylabel("Temperature (°C)", fontsize=axis_fontsize)
+    if title_fontsize is None:
+        ax.set_title(title)
+    else:
+        ax.set_title(title, fontsize=title_fontsize)
     ax.grid(True, alpha=0.3)
+    if axis_fontsize is not None:
+        ax.tick_params(axis="both", labelsize=axis_fontsize)
 
     handles, labels = ax.get_legend_handles_labels()
     if include_valve and "valve_state" in data.columns:
@@ -75,7 +86,7 @@ def plot_temperatures(
                 label = label_text if label_text else None
                 add_span(t_edges[segment_start], t_edges[-1], label)
 
-    ax.legend(handles, labels, loc="best")
+    ax.legend(handles, labels, loc="best", fontsize=legend_fontsize)
 
     fig.tight_layout()
     return fig, ax

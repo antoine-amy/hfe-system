@@ -18,6 +18,10 @@ constexpr size_t MAX_TCS_OUT = 10;
 // ── Valve output ─────────────────────────────────────────────────────────
 constexpr int VALVE_PIN = 7;
 
+// ── Heater relays ────────────────────────────────────────────────────────
+constexpr int HEATER_BOTTOM_PIN = 11;  // tank bottom heater relay
+constexpr int HEATER_EXHAUST_PIN = 5;  // LN exhaust heater relay
+
 // ── Pump / VFD (Fuji FRENIC-Mini) ────────────────────────────────────────
 constexpr uint8_t  PWM_PIN           = 6;       // OC4A on Arduino Mega
 constexpr uint16_t PWM_TOP           = 999;     // 2 kHz with prescaler 8
@@ -29,6 +33,20 @@ constexpr float    VFD_BASE_VOLTAGE  = 230.0f;  // nominal output voltage for % 
 constexpr uint8_t  VFD_SLAVE_ADDR    = 1;       // y01
 constexpr uint32_t VFD_BAUD          = 9600;    // y04
 constexpr unsigned long VFD_POLL_MS  = 1000UL;  // poll M09–M12 once per second
+
+// ── Pressure sensors (0–5.013 V = 10 bar gauge) ─────────────────────────
+// IMPORTANT: these must be analog-capable pins (A0–A15 on the Mega). If you move the wiring,
+// update these constants to the matching Ax (or 54..69) numbers.
+constexpr uint8_t PRESSURE_PIN_BEFORE = A8;  // before pump
+constexpr uint8_t PRESSURE_PIN_AFTER  = A0;  // after pump
+constexpr uint8_t PRESSURE_PIN_TANK   = A1;  // tank
+constexpr float   PRESSURE_FSO_V      = 5.013f;   // full-scale output voltage
+constexpr float   PRESSURE_FSO_BAR    = 10.0f;    // full-scale in bar (gauge)
+constexpr float   PRESSURE_ERR_BAR    = 0.05f;    // sensor accuracy (±)
+constexpr float   ADC_REF_V           = 5.0f;     // default analog reference (5 V)
+constexpr float   PSI_PER_BAR         = 14.5037738f;
+constexpr float   ATMOSPHERE_BAR      = 1.01325f; // add for absolute pressure display
+constexpr float   PRESSURE_AFTER_ZERO_V = 0.029f; // 1 atm output for after-pump sensor
 
 // Modbus group M registers (Fuji FRENIC-Mini)
 constexpr uint16_t REG_M09 = 0x0809;  // output frequency (0.01 Hz)
@@ -44,6 +62,8 @@ enum OverrideMode : uint8_t { AUTO = 0, FORCE_OPEN = 1, FORCE_CLOSE = 2 };
 
 static ValveState   g_valve = CLOSED;
 static OverrideMode g_mode  = AUTO;
+static bool         g_heater_bottom_on = false;
+static bool         g_heater_exhaust_on = false;
 
 // ── Sensor objects (software SPI: (CS, DI, DO, CLK)) ─────────────────────
 static Adafruit_MAX31856* tc[NUM_TCS] = { nullptr };
@@ -69,9 +89,42 @@ static VfdSnapshot g_vfd = { false, NAN, NAN, NAN, NAN, 0 };
 static float       g_pump_cmd_pct = 0.0f;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+static float readPressureVolts(uint8_t pin) {
+  int raw = analogRead(pin);
+  if (raw < 0 || raw > 1023) return NAN;
+  return raw * (ADC_REF_V / 1023.0f);
+}
+
+static float voltsToBar(float volts) {
+  if (!isfinite(volts)) return NAN;
+  float bar = volts * (PRESSURE_FSO_BAR / PRESSURE_FSO_V);
+  if (!isfinite(bar)) return NAN;
+  if (bar < 0.02f) bar = 0.0f; // clamp small offsets/noise
+  return bar;
+}
+
+static float voltsToBarAfter(float volts) {
+  if (!isfinite(volts)) return NAN;
+  const float slope = PRESSURE_FSO_BAR / (PRESSURE_FSO_V - PRESSURE_AFTER_ZERO_V);
+  float bar = (volts - PRESSURE_AFTER_ZERO_V) * slope;
+  if (!isfinite(bar)) return NAN;
+  if (fabs(bar) < 0.02f) bar = 0.0f; // deadband around atmospheric for noise
+  return bar;
+}
+
 static void applyValve(ValveState v) {
   g_valve = v;
   digitalWrite(VALVE_PIN, v == OPEN ? HIGH : LOW);
+}
+
+static void applyHeaterBottom(bool on) {
+  g_heater_bottom_on = on;
+  digitalWrite(HEATER_BOTTOM_PIN, on ? HIGH : LOW);
+}
+
+static void applyHeaterExhaust(bool on) {
+  g_heater_exhaust_on = on;
+  digitalWrite(HEATER_EXHAUST_PIN, on ? HIGH : LOW);
 }
 
 static void setupPwm2kHz() {
@@ -207,6 +260,10 @@ static void handleCommand(const String& s) {
   if (upper == "VALVE OPEN")       { g_mode = FORCE_OPEN;  applyValve(OPEN);   }
   else if (upper == "VALVE CLOSE") { g_mode = FORCE_CLOSE; applyValve(CLOSED); }
   else if (upper == "VALVE AUTO")  { g_mode = AUTO; }
+  else if (upper == "HEATER BOTTOM ON")    { applyHeaterBottom(true); }
+  else if (upper == "HEATER BOTTOM OFF")   { applyHeaterBottom(false); }
+  else if (upper == "HEATER EXHAUST ON")   { applyHeaterExhaust(true); }
+  else if (upper == "HEATER EXHAUST OFF")  { applyHeaterExhaust(false); }
   else if (upper.startsWith("PUMP")) {
     String rest = cmd.substring(4);
     rest.trim();
@@ -243,7 +300,9 @@ static float safeReadCelsius(Adafruit_MAX31856* dev) {
   return t;
 }
 
-static void emitTelemetry(const float temps[], size_t count, unsigned long nowMs) {
+static void emitTelemetry(const float temps[], size_t count, unsigned long nowMs,
+                          float pressureBeforeBar, float pressureAfterBar, float pressureTankBar,
+                          float pressureAfterVolts) {
   const float t_s = nowMs / 1000.0f;
   const char modeChar = (g_mode == AUTO) ? 'A' : (g_mode == FORCE_OPEN ? 'O' : 'C');
 
@@ -313,6 +372,38 @@ static void emitTelemetry(const float temps[], size_t count, unsigned long nowMs
     }
   }
 
+  Serial.print(F(",\"pressure_before_bar\":"));
+  if (isfinite(pressureBeforeBar)) Serial.print(pressureBeforeBar, 3); else Serial.print(F("null"));
+  Serial.print(F(",\"pressure_after_bar\":"));
+  if (isfinite(pressureAfterBar)) Serial.print(pressureAfterBar, 3); else Serial.print(F("null"));
+  Serial.print(F(",\"pressure_tank_bar\":"));
+  if (isfinite(pressureTankBar)) Serial.print(pressureTankBar, 3); else Serial.print(F("null"));
+
+  Serial.print(F(",\"pressure_before_bar_abs\":"));
+  if (isfinite(pressureBeforeBar)) Serial.print(pressureBeforeBar + ATMOSPHERE_BAR, 3); else Serial.print(F("null"));
+  Serial.print(F(",\"pressure_after_bar_abs\":"));
+  if (isfinite(pressureAfterBar)) Serial.print(pressureAfterBar + ATMOSPHERE_BAR, 3); else Serial.print(F("null"));
+  Serial.print(F(",\"pressure_tank_bar_abs\":"));
+  if (isfinite(pressureTankBar)) Serial.print(pressureTankBar + ATMOSPHERE_BAR, 3); else Serial.print(F("null"));
+
+  Serial.print(F(",\"pressure_after_v\":"));
+  if (isfinite(pressureAfterVolts)) Serial.print(pressureAfterVolts, 3); else Serial.print(F("null"));
+
+  Serial.print(F(",\"pressure_before_psi\":"));
+  if (isfinite(pressureBeforeBar)) Serial.print(pressureBeforeBar * PSI_PER_BAR, 3); else Serial.print(F("null"));
+  Serial.print(F(",\"pressure_after_psi\":"));
+  if (isfinite(pressureAfterBar)) Serial.print(pressureAfterBar * PSI_PER_BAR, 3); else Serial.print(F("null"));
+  Serial.print(F(",\"pressure_tank_psi\":"));
+  if (isfinite(pressureTankBar)) Serial.print(pressureTankBar * PSI_PER_BAR, 3); else Serial.print(F("null"));
+
+  Serial.print(F(",\"pressure_error_bar\":"));
+  Serial.print(PRESSURE_ERR_BAR, 3);
+  Serial.print('}');
+  Serial.print(F(",\"heaters\":{"));
+  Serial.print(F("\"bottom\":"));
+  Serial.print(g_heater_bottom_on ? 1 : 0);
+  Serial.print(F(",\"exhaust\":"));
+  Serial.print(g_heater_exhaust_on ? 1 : 0);
   Serial.print('}');
   Serial.println('}');
 }
@@ -320,12 +411,21 @@ static void emitTelemetry(const float temps[], size_t count, unsigned long nowMs
 void setup() {
   Serial.begin(115200);
   VFD.begin(VFD_BAUD, SERIAL_8E1);
+  analogReference(DEFAULT);
 
   setupPwm2kHz();
   setPumpCommandPct(0.0f);  // start at 0% analog
 
   pinMode(VALVE_PIN, OUTPUT);
   applyValve(CLOSED);
+  pinMode(HEATER_BOTTOM_PIN, OUTPUT);
+  pinMode(HEATER_EXHAUST_PIN, OUTPUT);
+  applyHeaterBottom(false);
+  applyHeaterExhaust(false);
+
+  pinMode(PRESSURE_PIN_BEFORE, INPUT);
+  pinMode(PRESSURE_PIN_AFTER, INPUT);
+  pinMode(PRESSURE_PIN_TANK, INPUT);
 
   pinMode(SCK_PIN,  OUTPUT);
   pinMode(MOSI_PIN, OUTPUT);
@@ -340,8 +440,8 @@ void setup() {
     tc[i]->setNoiseFilter(MAX31856_NOISE_FILTER_60HZ); // correct enum
   }
 
-  // JSON line telemetry: temps[0..9] (°C), valve (0/1), mode (A/O/C), pump{} (VFD)
-  Serial.println(F("# Telemetry keys: temps[0..9] (°C), valve (0/1), mode (A/O/C), pump{} (VFD)"));
+  // JSON line telemetry: temps[0..9] (°C), valve (0/1), mode (A/O/C), pump{} (VFD + pressures), heaters{}
+  Serial.println(F("# Telemetry keys: temps[0..9] (°C), valve (0/1), mode (A/O/C), pump{} (VFD + pressures), heaters{bottom,exhaust}"));
 }
 
 void loop() {
@@ -385,6 +485,16 @@ void loop() {
     } else if (g_mode == FORCE_OPEN)  applyValve(OPEN);
     else if (g_mode == FORCE_CLOSE)   applyValve(CLOSED);
 
-    emitTelemetry(temps_out, MAX_TCS_OUT, now);
+    float pressureBeforeVolts = readPressureVolts(PRESSURE_PIN_BEFORE);
+    float pressureAfterVolts  = readPressureVolts(PRESSURE_PIN_AFTER);
+    float pressureTankVolts   = readPressureVolts(PRESSURE_PIN_TANK);
+
+    float pressureBeforeBar = voltsToBar(pressureBeforeVolts);
+    float pressureAfterBar  = voltsToBarAfter(pressureAfterVolts);
+    float pressureTankBar   = voltsToBar(pressureTankVolts);
+
+    emitTelemetry(temps_out, MAX_TCS_OUT, now,
+                  pressureBeforeBar, pressureAfterBar, pressureTankBar,
+                  pressureAfterVolts);
   }
 }

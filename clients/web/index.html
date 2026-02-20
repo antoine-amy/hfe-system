@@ -63,6 +63,11 @@
             <p id="overview-avg-temp" class="overview-value">—</p>
             <p class="overview-hint">Average of sensors currently marked for control.</p>
           </article>
+          <article class="overview-card">
+            <h3>Tank Pressure</h3>
+            <p id="overview-tank-pressure" class="overview-value">—</p>
+            <p id="overview-tank-pressure-sub" class="overview-subvalue muted">(±0.05 bar)</p>
+          </article>
         </section>
 
         <section id="chart-section">
@@ -173,12 +178,12 @@
               <div class="metric-block">
                 <span class="metric-label">Before Pump</span>
                 <span id="pump-pressure-before" class="metric-value">—</span>
-                <span id="pump-pressure-before-unit" class="metric-unit">psi</span>
+                <span id="pump-pressure-before-unit" class="metric-unit">(±0.05 bar)</span>
               </div>
               <div class="metric-block">
                 <span class="metric-label">After Pump</span>
                 <span id="pump-pressure-after" class="metric-value">—</span>
-                <span id="pump-pressure-after-unit" class="metric-unit">psi</span>
+                <span id="pump-pressure-after-unit" class="metric-unit">(±0.05 bar)</span>
               </div>
             </div>
           </div>
@@ -189,7 +194,7 @@
         <section class="hero-card">
           <h2>Heat Exchanger</h2>
           <p>
-            Detailed heat exchanger tools will live here soon. Use this tab for valve control and temperature targeting.
+            Control the LN valve, heaters, and temperature targets for the heat exchanger from this tab.
           </p>
         </section>
 
@@ -239,6 +244,27 @@
                 <button type="submit" class="primary">Apply</button>
               </div>
             </form>
+          </div>
+          <div class="control-group">
+            <h2>Heaters</h2>
+            <div class="metric-grid metrics-two">
+              <div class="metric-block">
+                <span class="metric-label">Bottom heater</span>
+                <span id="heater-bottom-state" class="heater-state valve-closed">—</span>
+                <div class="button-row compact">
+                  <button data-cmd="HEATER BOTTOM ON" class="primary">On</button>
+                  <button data-cmd="HEATER BOTTOM OFF">Off</button>
+                </div>
+              </div>
+              <div class="metric-block">
+                <span class="metric-label">LN exhaust heater</span>
+                <span id="heater-exhaust-state" class="heater-state valve-closed">—</span>
+                <div class="button-row compact">
+                  <button data-cmd="HEATER EXHAUST ON" class="primary">On</button>
+                  <button data-cmd="HEATER EXHAUST OFF">Off</button>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
       </div>

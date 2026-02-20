@@ -8,6 +8,35 @@
   const PUMP_MAX_CMD_PCT = 100.0;
   const PUMP_MAX_FREQ_HZ = 71.7;
   const PUMP_SAFE_MAX_HZ = 60.0;
+  const PUMP_LOG_FIELDS = [
+    { column: 'pump_cmd_pct', key: 'cmd_pct', digits: 3 },
+    { column: 'pump_cmd_hz', key: 'cmd_hz', digits: 3 },
+    { column: 'pump_freq_hz', key: 'freq_hz', digits: 3 },
+    { column: 'pump_freq_pct', key: 'freq_pct', digits: 2 },
+    { column: 'pump_input_power_w', key: 'input_power_w', digits: 2 },
+    { column: 'pump_input_power_pct', key: 'input_power_pct', digits: 2 },
+    { column: 'pump_output_current_a', key: 'output_current_a', digits: 3 },
+    { column: 'pump_output_current_pct', key: 'output_current_pct', digits: 2 },
+    { column: 'pump_output_voltage_v', key: 'output_voltage_v', digits: 2 },
+    { column: 'pump_output_voltage_pct', key: 'output_voltage_pct', digits: 2 },
+    { column: 'pump_pressure_before_bar', key: 'pressure_before_bar', digits: 3 },
+    { column: 'pump_pressure_after_bar', key: 'pressure_after_bar', digits: 3 },
+    { column: 'pump_pressure_tank_bar', key: 'pressure_tank_bar', digits: 3 },
+    { column: 'pump_pressure_after_v', key: 'pressure_after_v', digits: 3 },
+    { column: 'pump_pressure_before_psi', key: 'pressure_before_psi', digits: 2 },
+    { column: 'pump_pressure_after_psi', key: 'pressure_after_psi', digits: 2 },
+    { column: 'pump_pressure_tank_psi', key: 'pressure_tank_psi', digits: 2 },
+    { column: 'pump_pressure_error_bar', key: 'pressure_error_bar', digits: 3 },
+    { column: 'pump_max_freq_hz', key: 'max_freq_hz', digits: 3 },
+  ];
+  const LOG_HEADER = [
+    'time_s',
+    ...Array.from({ length: MAX_SENSORS }, (_, idx) => `temp${idx}_C`),
+    'valve',
+    'mode',
+    ...PUMP_LOG_FIELDS.map((field) => field.column),
+  ];
+  const PUMP_FIELD_DIGITS = new Map(PUMP_LOG_FIELDS.map((field) => [field.column, field.digits || 3]));
 
   const params = new URLSearchParams(window.location.search);
   const tokenParam = params.get('token') || '';
@@ -22,6 +51,8 @@
   const commandStatusEl = document.getElementById('command-status');
   const valveStateEl = document.getElementById('valve-state');
   const modeStateEl = document.getElementById('mode-state');
+  const heaterBottomStateEl = document.getElementById('heater-bottom-state');
+  const heaterExhaustStateEl = document.getElementById('heater-exhaust-state');
   // pump overview + controls
   const overviewPumpSpeedEl = document.getElementById('overview-pump-speed');
   const overviewPumpSpeedSubEl = document.getElementById('overview-pump-speed-sub');
@@ -36,6 +67,8 @@
   const pumpCmdFlowEl = document.getElementById('pump-cmd-flow');
   const pumpPressureBeforeEl = document.getElementById('pump-pressure-before');
   const pumpPressureAfterEl = document.getElementById('pump-pressure-after');
+  const pumpPressureBeforeUnitEl = document.getElementById('pump-pressure-before-unit');
+  const pumpPressureAfterUnitEl = document.getElementById('pump-pressure-after-unit');
   const vfdFrequencyEl = document.getElementById('vfd-frequency');
   const vfdFrequencyPctEl = document.getElementById('vfd-frequency-pct');
   const vfdCurrentEl = document.getElementById('vfd-current');
@@ -52,6 +85,8 @@
   const overviewConnectionEl = document.getElementById('overview-connection');
   const overviewValveEl = document.getElementById('overview-valve');
   const overviewAvgTempEl = document.getElementById('overview-avg-temp');
+  const overviewTankPressureEl = document.getElementById('overview-tank-pressure');
+  const overviewTankPressureSubEl = document.getElementById('overview-tank-pressure-sub');
   const sensorValuesEl = document.getElementById('sensor-values');
   const loggingToggleBtn = document.getElementById('logging-toggle');
   const setpointForm = document.getElementById('setpoint-form');
@@ -370,6 +405,49 @@
     scheduleChartHeightUpdate();
   }
 
+  function extractPumpLogValues(pump) {
+    const src = pump && typeof pump === 'object' ? pump : null;
+    return PUMP_LOG_FIELDS.map((field) => {
+      const raw = src ? src[field.key] : null;
+      if (raw === null || raw === undefined) {
+        return NaN;
+      }
+      const num = typeof raw === 'number' ? raw : Number(raw);
+      return Number.isFinite(num) ? num : NaN;
+    });
+  }
+
+  function formatLogValue(column, value) {
+    if (column === 'time_s') {
+      const num = typeof value === 'number' ? value : Number(value);
+      return Number.isFinite(num) ? num.toFixed(3) : 'nan';
+    }
+    if (column.startsWith('temp')) {
+      const num = typeof value === 'number' ? value : Number(value);
+      return Number.isFinite(num) ? num.toFixed(2) : 'nan';
+    }
+    if (column === 'valve') {
+      const num = typeof value === 'number' ? value : Number(value);
+      return Number.isFinite(num) ? String(Math.round(num)) : '0';
+    }
+    if (column === 'mode') {
+      const text = typeof value === 'string' ? value : String(value || '');
+      return text.slice(0, 1);
+    }
+    if (column.startsWith('pump_')) {
+      const digits = PUMP_FIELD_DIGITS.get(column) || 3;
+      const num = typeof value === 'number' ? value : Number(value);
+      return Number.isFinite(num) ? num.toFixed(digits) : 'nan';
+    }
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value.toString() : 'nan';
+    }
+    if (typeof value === 'string') {
+      return value;
+    }
+    return '';
+  }
+
   function ensureSensorSelections(count) {
     for (let i = 0; i < count; i += 1) {
       if (typeof sensorSelections[i] !== 'boolean') {
@@ -495,6 +573,47 @@
     if (subEl) {
       subEl.textContent = Number.isFinite(pctValue) ? `${pctValue.toFixed(1)} %` : '—';
     }
+  }
+
+  function renderHeaterState(el, onValue) {
+    if (!el) {
+      return;
+    }
+    if (onValue === null || onValue === undefined) {
+      el.textContent = '—';
+      el.classList.remove('valve-open');
+      el.classList.add('valve-closed');
+      return;
+    }
+    const active = Boolean(onValue);
+    el.textContent = active ? 'On' : 'Off';
+    el.classList.toggle('valve-open', active);
+    el.classList.toggle('valve-closed', !active);
+  }
+
+  function coerceOnOff(value) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value === 'number') {
+      return Number.isNaN(value) ? null : value !== 0;
+    }
+    if (typeof value === 'string') {
+      const norm = value.trim().toLowerCase();
+      if (!norm) {
+        return null;
+      }
+      if (norm === 'on' || norm === '1' || norm === 'true') {
+        return true;
+      }
+      if (norm === 'off' || norm === '0' || norm === 'false') {
+        return false;
+      }
+    }
+    return null;
   }
 
   function currentMaxPumpPct() {
@@ -758,17 +877,37 @@
       vfdPowerUnitEl.textContent = 'W';
     }
 
+    const pressureError =
+      pump && Number.isFinite(pump.pressure_error_bar) ? pump.pressure_error_bar : 0.05;
+    const pressureUnitText = `(±${pressureError.toFixed(2)} bar)`;
+    if (pumpPressureBeforeUnitEl) {
+      pumpPressureBeforeUnitEl.textContent = pressureUnitText;
+    }
+    if (pumpPressureAfterUnitEl) {
+      pumpPressureAfterUnitEl.textContent = pressureUnitText;
+    }
+
+    const beforeBar =
+      pump && Number.isFinite(pump.pressure_before_bar_abs) ? pump.pressure_before_bar_abs : null;
+    const afterBar =
+      pump && Number.isFinite(pump.pressure_after_bar_abs) ? pump.pressure_after_bar_abs : null;
+    const tankBar =
+      pump && Number.isFinite(pump.pressure_tank_bar_abs) ? pump.pressure_tank_bar_abs : null;
+    const afterVolts =
+      pump && Number.isFinite(pump.pressure_after_v) ? pump.pressure_after_v : null;
+
     if (pumpPressureBeforeEl) {
-      const beforePsi =
-        pump && Number.isFinite(pump.pressure_before_psi) ? pump.pressure_before_psi : null;
-      pumpPressureBeforeEl.textContent = Number.isFinite(beforePsi)
-        ? beforePsi.toFixed(2)
-        : '—';
+      pumpPressureBeforeEl.textContent = Number.isFinite(beforeBar) ? beforeBar.toFixed(2) : '—';
     }
     if (pumpPressureAfterEl) {
-      const afterPsi =
-        pump && Number.isFinite(pump.pressure_after_psi) ? pump.pressure_after_psi : null;
-      pumpPressureAfterEl.textContent = Number.isFinite(afterPsi) ? afterPsi.toFixed(2) : '—';
+      const value = Number.isFinite(afterBar) ? afterBar : null;
+      pumpPressureAfterEl.textContent = Number.isFinite(value) ? value.toFixed(2) : '—';
+    }
+    if (overviewTankPressureEl) {
+      overviewTankPressureEl.textContent = Number.isFinite(tankBar) ? tankBar.toFixed(2) : '—';
+    }
+    if (overviewTankPressureSubEl) {
+      overviewTankPressureSubEl.textContent = pressureUnitText;
     }
   }
 
@@ -843,6 +982,12 @@
       }
     }
 
+    const heaters = data && typeof data.heaters === 'object' ? data.heaters : null;
+    const bottomOn = heaters ? coerceOnOff(heaters.bottom) : null;
+    const exhaustOn = heaters ? coerceOnOff(heaters.exhaust) : null;
+    renderHeaterState(heaterBottomStateEl, bottomOn);
+    renderHeaterState(heaterExhaustStateEl, exhaustOn);
+
     latestSnapshot = {
       temps: temps.slice(0, MAX_SENSORS),
       sensorCount,
@@ -861,10 +1006,12 @@
     if (loggingEnabled) {
       const row = [ts];
       for (let i = 0; i < MAX_SENSORS; i += 1) {
-        row.push(Number.isFinite(temps[i]) ? temps[i] : 'nan');
+        const value = temps[i];
+        row.push(Number.isFinite(value) ? value : NaN);
       }
       row.push(valve);
       row.push(modeChar);
+      row.push(...extractPumpLogValues(pump));
       loggingRows.push(row);
     }
 
@@ -1025,29 +1172,9 @@
       setCommandStatus('No rows logged yet', 'warn');
       return;
     }
-    const header = ['time_s'];
-    for (let i = 0; i < MAX_SENSORS; i += 1) {
-      header.push(`temp${i}_C`);
-    }
-    header.push('valve', 'mode');
-
-    const lines = [header.join(',')];
+    const lines = [LOG_HEADER.join(',')];
     for (const row of loggingRows) {
-      const formatted = row.map((value, idx) => {
-        if (idx === 0) {
-          return typeof value === 'number' ? value.toFixed(3) : 'nan';
-        }
-        if (idx <= MAX_SENSORS) {
-          if (typeof value === 'number') {
-            return Number.isFinite(value) ? value.toFixed(2) : 'nan';
-          }
-          return value;
-        }
-        if (idx === MAX_SENSORS + 1) {
-          return Number(value);
-        }
-        return String(value || '');
-      });
+      const formatted = LOG_HEADER.map((column, idx) => formatLogValue(column, row[idx]));
       lines.push(formatted.join(','));
     }
 
