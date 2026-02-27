@@ -24,10 +24,6 @@ __pycache__/
 
 # Runtime artifacts
 logs/
-supervisor/data/
-data/raw/
-data/processed/
-data/reports/
 *.parquet
 *.csv
 
