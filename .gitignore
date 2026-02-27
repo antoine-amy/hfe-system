@@ -26,6 +26,8 @@ __pycache__/
 logs/
 supervisor/data/
 data/raw/
+data/processed/
+data/reports/
 *.parquet
 *.csv
 
@@ -38,3 +40,4 @@ Thumbs.db
 
 # Analysis build artifacts
 analysis/src/hfe_ana/__pycache__/
+supervisor/__pycache__/
