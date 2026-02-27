@@ -14,6 +14,18 @@
 - `cd firmware`
 - `platformio run -t upload`
 
+## Arduino Connection / Reconnection
+First-time connection (or new Arduino):
+1. Plug the Arduino in via USB.
+2. Find the serial port (Linux: `ls /dev/ttyACM* /dev/ttyUSB*`) and set `serial.port` in `config/config.yaml`.
+3. Start the supervisor (this uploads firmware by default): `bash scripts/start_supervisor.sh`
+4. Confirm the serial link in `logs/supervisor.log` (look for `Serial connected:`). If you see `Serial unavailable`, fix the port and restart the supervisor.
+
+After a computer reboot/reset or after unplugging/replugging the Arduino:
+1. Verify the Arduino is connected and the port name in `config/config.yaml` is still correct.
+2. Restart the supervisor to reconnect to serial: `bash scripts/start_supervisor.sh`
+3. If you do not need to reflash firmware, skip it with `FLASH_FIRMWARE=0 bash scripts/start_supervisor.sh`.
+
 ## Supervisor API
 - Configure `config/config.yaml` with the serial port, bind host/port, and (optionally) `auth_token`.
 - Launch the API: `bash scripts/start_supervisor.sh`
